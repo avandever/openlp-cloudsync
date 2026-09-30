@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install NSIS and zip
+        run: sudo apt-get update && sudo apt-get install -y nsis zip
+
+      - name: Stamp version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "$VERSION" > plugin/cloudsync/version.txt
+          sed -i "s/!define PLUGIN_VERSION \".*\"/!define PLUGIN_VERSION \"$VERSION\"/" installer/cloudsync-installer.nsi
+
+      - name: Build Windows installer
+        run: |
+          cp -r plugin/cloudsync installer/cloudsync
+          cd installer && makensis cloudsync-installer.nsi
+          mv CloudSync-Setup-*.exe "$GITHUB_WORKSPACE/"
+
+      - name: Build portable zip
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist/openlp-cloudsync-portable
+          cp installer/Install.bat installer/Install-CloudSync.ps1 installer/install.sh dist/openlp-cloudsync-portable/
+          cp -r plugin/cloudsync dist/openlp-cloudsync-portable/
+          cd dist && zip -qr "../openlp-cloudsync-portable-$VERSION.zip" openlp-cloudsync-portable
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            CloudSync-Setup-*.exe
+            openlp-cloudsync-portable-*.zip
+          generate_release_notes: true

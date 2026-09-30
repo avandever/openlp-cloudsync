@@ -1,0 +1,26 @@
+# OAuth client secrets -- never commit the real one. Copy
+# plugin/cloudsync/client.json.example to plugin/cloudsync/client.json
+# and fill in your own Google Cloud OAuth client.
+plugin/cloudsync/client.json
+
+# Per-user OAuth tokens and sync state (created at runtime)
+**/token.json
+**/sync-state.json
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Build artefacts
+*.exe
+*.zip
+installer/cloudsync/
+installer/payload-*/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
