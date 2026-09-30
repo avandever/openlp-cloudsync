@@ -31,7 +31,6 @@ import zipfile
 import pytest
 
 from openlp.plugins.cloudsync.lib.backup import (
-    _should_exclude,
     compute_fingerprint,
     compute_sha256,
     create_library_archive,
@@ -78,14 +77,14 @@ def test_create_archive_returns_metadata_with_matching_sha256(data_dir, tmp_path
     assert metadata['file_count'] > 0
 
 
-def test_archive_contains_library_files(data_dir, tmp_path, work_dir):
+def test_archive_contains_only_songs_and_meta(data_dir, tmp_path, work_dir):
+    # Songs-only archives (v13.6+): the songs database plus the sync
+    # metadata, and nothing else -- no services, notes, themes or bibles.
     archive_path, _metadata = create_library_archive(data_dir, work_dir=work_dir)
 
     with zipfile.ZipFile(archive_path) as archive:
         names = set(archive.namelist())
-    assert 'songs/songs.sqlite' in names
-    assert 'services/sunday.osj' in names
-    assert 'notes.txt' in names
+    assert names == {'songs/songs.sqlite', 'cloudsync-meta.json'}
 
 
 def test_archive_excludes_noise_files(data_dir, tmp_path, work_dir):
@@ -104,9 +103,8 @@ def test_archive_excludes_noise_files(data_dir, tmp_path, work_dir):
     for excluded in ('debug.log', 'scratch.tmp', 'cache.lock', 'backup.swp',
                      'token.json', 'state.json', 'pending-restore.json'):
         assert excluded not in names
-    # The excluded files must also not count towards the file count.
-    # (The archive now always carries the sync metadata file too.)
-    assert len(names) == 4
+    # Songs-only: just the songs database plus the sync metadata file.
+    assert names == {'songs/songs.sqlite', 'cloudsync-meta.json'}
 
 
 def test_archive_excludes_plugin_section_dir(data_dir, tmp_path, work_dir):
@@ -128,7 +126,7 @@ def test_archive_includes_sync_meta(data_dir, work_dir):
     with zipfile.ZipFile(archive_path) as archive:
         meta = json.loads(archive.read('cloudsync-meta.json'))
 
-    assert meta['format'] == 1
+    assert meta['format'] == 2
     assert meta['hostname']
     assert meta['created_utc']
     # No merge base exists in the fake data dir: this reads as a
@@ -190,17 +188,6 @@ def test_archive_sync_meta_counts_songs(data_dir, work_dir):
     assert meta['song_count'] == 2
 
 
-def test_should_exclude_paths():
-    from pathlib import PurePosixPath
-    assert _should_exclude(PurePosixPath('cloudsync/token.json'))
-    assert _should_exclude(PurePosixPath('cloudsync/state.json'))
-    assert _should_exclude(PurePosixPath('sub/dir/debug.log'))
-    assert _should_exclude(PurePosixPath('sub/notes.TMP'))
-    assert _should_exclude(PurePosixPath('token.json'))
-    assert not _should_exclude(PurePosixPath('songs/songs.sqlite'))
-    assert not _should_exclude(PurePosixPath('token.json.bak'))
-
-
 def test_sqlite_database_is_snapshotted(data_dir, tmp_path, work_dir):
     db_path = data_dir / 'songs' / 'songs.sqlite'
     connection = sqlite3.connect(str(db_path))
@@ -226,18 +213,41 @@ def test_create_archive_missing_dir_raises(tmp_path, work_dir):
         create_library_archive(tmp_path / 'does-not-exist', work_dir=work_dir)
 
 
+def test_create_archive_without_songs_db_raises(tmp_path, work_dir):
+    data_dir = tmp_path / 'data'
+    data_dir.mkdir()
+    (data_dir / 'notes.txt').write_text('no songs here')
+    with pytest.raises(FileNotFoundError):
+        create_library_archive(data_dir, work_dir=work_dir)
+
+
 def test_fingerprint_is_stable(data_dir):
     assert compute_fingerprint(data_dir) == compute_fingerprint(data_dir)
 
 
-def test_fingerprint_changes_when_file_changes(data_dir):
+def test_fingerprint_changes_when_songs_db_changes(data_dir):
     before = compute_fingerprint(data_dir)
-    target = data_dir / 'notes.txt'
-    target.write_text('changed content')
+    target = data_dir / 'songs' / 'songs.sqlite'
+    connection = sqlite3.connect(str(target))
+    connection.execute('CREATE TABLE songs (id INTEGER PRIMARY KEY)')
+    connection.commit()
+    connection.close()
     # Guarantee a distinct mtime even on coarse filesystems.
     stat = target.stat()
     os.utime(target, (stat.st_atime_ns, stat.st_mtime_ns + 10_000_000))
     assert compute_fingerprint(data_dir) != before
+
+
+def test_fingerprint_ignores_non_song_files(data_dir):
+    # Songs-only sync: themes, notes, bibles and friends must not trigger
+    # an upload on their own.
+    before = compute_fingerprint(data_dir)
+    (data_dir / 'notes.txt').write_text('changed content')
+    (data_dir / 'themes').mkdir(exist_ok=True)
+    (data_dir / 'themes' / 'dark.json').write_text('{}')
+    stat = (data_dir / 'notes.txt').stat()
+    os.utime(data_dir / 'notes.txt', (stat.st_atime_ns, stat.st_mtime_ns + 10_000_000))
+    assert compute_fingerprint(data_dir) == before
 
 
 def test_fingerprint_ignores_excluded_files(data_dir):

@@ -20,13 +20,18 @@
 ##########################################################################
 """
 The :mod:`~openlp.plugins.cloudsync.lib.backup` module creates consistent,
-self-describing snapshots of the OpenLP data directory for cloud sync.
+self-describing snapshots of the OpenLP songs library for cloud sync.
+
+Since v13.6 the archive is songs-only: it carries the songs database plus
+the sync metadata, nothing else.  Bibles, themes and images stay
+machine-local (bibles were never applied on download anyway -- replacing an
+open SQLite database while OpenLP runs is unsafe -- and themes/images are
+rarely worth their megabytes on every sync).
 
 OpenLP keeps its SQLite databases open while it runs, so copying the raw
-files can produce a corrupt backup.  Every ``*.sqlite``/``*.db`` file is
-therefore snapshotted with SQLite's ``VACUUM INTO`` (a transactionally
-consistent copy) before being zipped.  The plugin's own working files
-(tokens, sync state, staged downloads) are excluded from the archive.
+file can produce a corrupt backup.  The songs database is therefore
+snapshotted with SQLite's ``VACUUM INTO`` (a transactionally consistent
+copy) before being zipped.
 """
 import hashlib
 import json
@@ -57,10 +62,6 @@ CLOUDSYNC_META_FILENAME = 'cloudsync-meta.json'
 
 # File suffixes treated as live SQLite databases needing VACUUM INTO.
 SQLITE_SUFFIXES = {'.sqlite', '.db'}
-
-# File name patterns excluded from archives (locks, logs, temp files).
-EXCLUDED_SUFFIXES = {'.log', '.tmp', '.lock', '.swp'}
-EXCLUDED_NAMES = {'token.json', 'state.json', 'pending-restore.json'}
 
 
 def compute_sha256(path):
@@ -98,28 +99,15 @@ def _snapshot_sqlite(source_path, staging_dir):
     return snapshot_path
 
 
-def _should_exclude(relative_path):
-    """
-    Decide whether a data-dir-relative path must be left out of the archive.
-
-    :param relative_path: Path relative to the OpenLP data directory.
-    :return: True if the file must be excluded.
-    """
-    parts = relative_path.parts
-    if parts and parts[0] == PLUGIN_SECTION_DIR:
-        return True
-    name = relative_path.name
-    if name in EXCLUDED_NAMES:
-        return True
-    if relative_path.suffix.lower() in EXCLUDED_SUFFIXES:
-        return True
-    return False
-
-
 def create_library_archive(data_dir, work_dir=None):
     """
-    Build a zip archive of the OpenLP data directory with consistent
-    database snapshots.
+    Build a songs-only zip archive of the OpenLP library with a consistent
+    database snapshot.
+
+    The archive carries the songs database (at its data-directory-relative
+    path, so the download side finds it) plus the sync metadata file.
+    Everything else in the data directory -- bibles, themes, images, the
+    plugin's own working files -- stays machine-local.
 
     :param data_dir: The OpenLP data directory to archive.
     :param work_dir: Directory for the staging area and resulting zip.
@@ -129,6 +117,12 @@ def create_library_archive(data_dir, work_dir=None):
     data_dir = Path(data_dir)
     if not data_dir.is_dir():
         raise FileNotFoundError('OpenLP data directory not found: {path}'.format(path=data_dir))
+    # Deferred import: songmerge imports names from this module.
+    from .songmerge import find_songs_db
+    songs_db = find_songs_db(data_dir)
+    if songs_db is None:
+        raise FileNotFoundError('No songs database found under {path}'.format(path=data_dir))
+    songs_relative = songs_db.relative_to(data_dir)
     hostname = socket.gethostname().replace(' ', '_')
     timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     archive_name = 'openlp-library-{host}-{ts}.zip'.format(host=hostname, ts=timestamp)
@@ -141,27 +135,20 @@ def create_library_archive(data_dir, work_dir=None):
     staging_dir.mkdir(parents=True, exist_ok=True)
     archive_path = work_dir / archive_name
 
-    log.info('Creating library archive from %s', data_dir)
+    log.info('Creating songs-only archive from %s', data_dir)
     file_count = 0
     with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-        for source_path in sorted(data_dir.rglob('*')):
-            if not source_path.is_file():
-                continue
-            relative_path = source_path.relative_to(data_dir)
-            if _should_exclude(relative_path):
-                log.debug('Excluding %s from archive', relative_path)
-                continue
-            if source_path.suffix.lower() in SQLITE_SUFFIXES:
-                try:
-                    snapshot = _snapshot_sqlite(source_path, staging_dir)
-                except sqlite3.Error:
-                    log.exception('Could not snapshot database %s, copying raw file instead', source_path)
-                    archive.write(source_path, str(relative_path))
-                else:
-                    archive.write(snapshot, str(relative_path))
+        if songs_db.suffix.lower() in SQLITE_SUFFIXES:
+            try:
+                snapshot = _snapshot_sqlite(songs_db, staging_dir)
+            except sqlite3.Error:
+                log.exception('Could not snapshot database %s, copying raw file instead', songs_db)
+                archive.write(songs_db, str(songs_relative))
             else:
-                archive.write(source_path, str(relative_path))
-            file_count += 1
+                archive.write(snapshot, str(songs_relative))
+        else:
+            archive.write(songs_db, str(songs_relative))
+        file_count += 1
         # Sync metadata: lets the downloading side merge safely.  The backup
         # records which songs the uploader had at its last sync, so a song
         # missing from the backup only reads as "deleted on the remote
@@ -169,7 +156,7 @@ def create_library_archive(data_dir, work_dir=None):
         # the uploader's library is smaller.
         base_songs_path = data_dir / PLUGIN_SECTION_DIR / BASE_SONGS_FILENAME
         sync_meta = {
-            'format': 1,
+            'format': 2,
             'hostname': hostname,
             'created_utc': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
             'has_base': base_songs_path.is_file(),
@@ -243,29 +230,28 @@ def _count_staged_songs(staging_dir):
 
 def compute_fingerprint(data_dir):
     """
-    Compute a cheap fingerprint of the data directory used to detect local
-    changes without re-hashing every file's contents.
+    Compute a cheap fingerprint of the songs database used to detect song
+    changes without re-hashing anything.
 
-    The fingerprint covers each file's relative path, size and mtime, which
-    is enough to notice any song/database/media change made by OpenLP.
+    Only the songs database is covered: since v13.6 the sync archive
+    carries songs alone, so a changed theme, bible or image must not
+    trigger an upload.
 
     :param data_dir: The OpenLP data directory.
     :return: Hex digest string.
     """
+    # Deferred import: songmerge imports names from this module.
+    from .songmerge import find_songs_db
     data_dir = Path(data_dir)
     digest = hashlib.sha256()
-    entries = []
-    for source_path in sorted(data_dir.rglob('*')):
-        if not source_path.is_file():
-            continue
-        relative_path = source_path.relative_to(data_dir)
-        if _should_exclude(relative_path):
-            continue
+    songs_db = find_songs_db(data_dir)
+    if songs_db is not None:
         try:
-            stat = source_path.stat()
+            stat = songs_db.stat()
         except OSError:
-            continue
-        entries.append('{path}\0{size}\0{mtime}'.format(
-            path=str(relative_path), size=stat.st_size, mtime=stat.st_mtime_ns))
-    digest.update('\n'.join(entries).encode('utf-8'))
+            pass
+        else:
+            digest.update('{path}\0{size}\0{mtime}'.format(
+                path=str(songs_db.relative_to(data_dir)),
+                size=stat.st_size, mtime=stat.st_mtime_ns).encode('utf-8'))
     return digest.hexdigest()

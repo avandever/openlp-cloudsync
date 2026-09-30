@@ -456,6 +456,7 @@ class TestPerformUpload:
         provider = FakeProvider()
         monkeypatch.setattr(controller, '_connect_provider', lambda: provider)
         settings.setValue('cloudsync/keep backups', 3)
+        (tmp_path / 'songs.sqlite').write_bytes(b'data')
         controller.perform_upload()
         assert provider.pruned == [(controller.drive_folder, 3)]
 
@@ -523,6 +524,7 @@ class TestDriveFolderRef:
         settings.setValue('cloudsync/drive folder id', 'pinned-42')
         provider = FakeProvider()
         monkeypatch.setattr(controller, '_connect_provider', lambda: provider)
+        (tmp_path / 'songs.sqlite').write_bytes(b'data')
         controller.perform_upload()
         assert provider.uploaded[0][2] == 'id:pinned-42'
         assert provider.pruned[0][0] == 'id:pinned-42'
