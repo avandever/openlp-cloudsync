@@ -372,7 +372,9 @@ def _read_client_secrets():
     if client_secrets_path is None or not client_secrets_path.is_file():
         raise AuthenticationError(
             'OAuth client secrets not found: the client.json bundled with '
-            'the Cloud Sync plugin is missing. Reinstall the plugin.')
+            'the Cloud Sync plugin is missing. If you installed a public '
+            'release, create your own from client.json.example as described '
+            'in the README; otherwise, reinstall the plugin.')
     try:
         data = json.loads(client_secrets_path.read_text(encoding='utf-8'))
     except (OSError, ValueError) as error:
