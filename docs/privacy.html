@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — OpenLP Cloud Sync plugin</title>
+<style>
+body { font-family: system-ui, -apple-system, sans-serif; max-width: 42em;
+       margin: 2em auto; padding: 0 1em; line-height: 1.6; color: #222; }
+h1 { font-size: 1.5em; }
+h2 { font-size: 1.15em; margin-top: 1.5em; }
+.muted { color: #666; }
+</style>
+</head>
+<body>
+<h1>Privacy Policy — OpenLP Cloud Sync plugin</h1>
+<p class="muted">Last updated: October 1, 2026</p>
+
+<p>The OpenLP Cloud Sync plugin ("the app") syncs your OpenLP song library
+between your own computers using your Google Drive.</p>
+
+<h2>Data the app accesses</h2>
+<p>The app uses a single Google OAuth scope,
+<code>https://www.googleapis.com/auth/drive.file</code>, which permits it to
+view and manage only the Google Drive files it created itself (your
+song-library backup files) or that you opened with it. The app cannot see,
+read, or modify any other files in your Google Drive.</p>
+
+<h2>Data the app stores</h2>
+<ul>
+  <li><strong>On your computer:</strong> your Google OAuth tokens (kept in the
+  plugin's local data folder) and a local copy of your song database used to
+  merge changes between machines.</li>
+  <li><strong>In your Google Drive:</strong> the song-library backup files
+  the app uploads, inside a folder the app creates.</li>
+</ul>
+
+<h2>What the developer does with your data</h2>
+<p>Nothing. There is no server, no analytics, no account system, and no
+telemetry. Your data never leaves your computers and your Google Drive. It
+is not sold, shared with third parties, or used for advertising.</p>
+
+<h2>Data retention and deletion</h2>
+<p>Uninstalling the plugin removes its local data folder, including stored
+tokens. Backup files in your Google Drive remain yours; delete them from
+Drive at any time.</p>
+
+<h2>Contact</h2>
+<p>Questions about this policy: open an issue at
+<a href="https://github.com/avandever/openlp-cloudsync">github.com/avandever/openlp-cloudsync</a>.</p>
+</body>
+</html>
