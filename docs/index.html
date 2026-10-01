@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenLP Cloud Sync</title>
+<style>
+body { font-family: system-ui, -apple-system, sans-serif; max-width: 44em;
+       margin: 2em auto; padding: 0 1em; line-height: 1.65; color: #222; }
+h1 { font-size: 1.8em; }
+h2 { font-size: 1.25em; margin-top: 1.75em; }
+.muted { color: #666; }
+.cta { display: inline-block; margin: 0.5em 0.5em 0.5em 0; padding: 0.6em 1.2em;
+       background: #1a73e8; color: #fff !important; text-decoration: none;
+       border-radius: 6px; font-weight: 600; }
+.cta.secondary { background: #fff; color: #1a73e8 !important;
+       border: 1px solid #1a73e8; }
+ul.tight li { margin-bottom: 0.4em; }
+footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd;
+         color: #666; font-size: 0.9em; }
+code { background: #f4f4f4; padding: 0.1em 0.35em; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>OpenLP Cloud Sync</h1>
+<p class="muted">Keep your OpenLP song library in sync across every computer you run — automatically, over your own Google Drive.</p>
+
+<p>
+  <a class="cta" href="https://github.com/avandever/openlp-cloudsync/releases">Download the installer</a>
+  <a class="cta secondary" href="https://github.com/avandever/openlp-cloudsync">Source code</a>
+</p>
+
+<h2>What it does</h2>
+<p>OpenLP Cloud Sync is a plugin for <a href="https://openlp.org/">OpenLP</a>, the
+free and open-source church presentation software. Once installed, it backs up
+your song library to a folder in your Google Drive and merges changes from your
+other machines — a true three-way sync, so edits made on any computer propagate
+everywhere without clobbering each other.</p>
+
+<ul class="tight">
+  <li><strong>Automatic merging</strong> — additions, edits, and deletions on
+  any machine are reconciled against a base snapshot, not blindly overwritten.</li>
+  <li><strong>Tiny backups</strong> — only the song database syncs (a few KB);
+  Bibles, themes, and images stay local to each machine.</li>
+  <li><strong>Minimal Google permissions</strong> — the app requests only the
+  <code>drive.file</code> scope, so it can touch <em>only</em> the backup files
+  it creates. It cannot see any other file in your Drive.</li>
+  <li><strong>No server, no account, no tracking</strong> — your data moves
+  between your computers and your Drive, and nowhere else. Read the
+  <a href="/privacy.html">privacy policy</a>.</li>
+</ul>
+
+<h2>Get started</h2>
+<ol>
+  <li>Download and run the Windows installer from the
+  <a href="https://github.com/avandever/openlp-cloudsync/releases">releases page</a>.</li>
+  <li>Restart OpenLP, open the Cloud Sync plugin tab, and click
+  <strong>Sign in with Google</strong>.</li>
+  <li>Click <strong>Sync now</strong> — repeat on each computer.</li>
+</ol>
+<p>Full walkthrough and troubleshooting are in the
+<a href="https://github.com/avandever/openlp-cloudsync#readme">README</a>.</p>
+
+<h2>Open source</h2>
+<p>OpenLP Cloud Sync is free and open-source software. Bug reports and
+contributions are welcome on
+<a href="https://github.com/avandever/openlp-cloudsync">GitHub</a>.</p>
+
+<footer>
+  <a href="/privacy.html">Privacy Policy</a> ·
+  OpenLP Cloud Sync is an independent open-source project, not affiliated
+  with or endorsed by OpenLP or Google.
+</footer>
+</body>
+</html>

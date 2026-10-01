@@ -5,48 +5,127 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Privacy Policy — OpenLP Cloud Sync plugin</title>
 <style>
-body { font-family: system-ui, -apple-system, sans-serif; max-width: 42em;
-       margin: 2em auto; padding: 0 1em; line-height: 1.6; color: #222; }
-h1 { font-size: 1.5em; }
-h2 { font-size: 1.15em; margin-top: 1.5em; }
+body { font-family: system-ui, -apple-system, sans-serif; max-width: 44em;
+       margin: 2em auto; padding: 0 1em; line-height: 1.65; color: #222; }
+h1 { font-size: 1.6em; }
+h2 { font-size: 1.2em; margin-top: 1.75em; }
 .muted { color: #666; }
+footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd;
+         color: #666; font-size: 0.9em; }
 </style>
 </head>
 <body>
 <h1>Privacy Policy — OpenLP Cloud Sync plugin</h1>
 <p class="muted">Last updated: October 1, 2026</p>
 
-<p>The OpenLP Cloud Sync plugin ("the app") syncs your OpenLP song library
-between your own computers using your Google Drive.</p>
+<p>The OpenLP Cloud Sync plugin (the "app") is an open-source plugin for
+<a href="https://openlp.org/">OpenLP</a>, the free church presentation
+software. It synchronizes a user's OpenLP song library between the user's
+own computers by storing encrypted-compressed backup files in the user's
+Google Drive. This policy explains what data the app touches, where that
+data lives, and what the developer does with it.</p>
 
-<h2>Data the app accesses</h2>
-<p>The app uses a single Google OAuth scope,
-<code>https://www.googleapis.com/auth/drive.file</code>, which permits it to
-view and manage only the Google Drive files it created itself (your
-song-library backup files) or that you opened with it. The app cannot see,
-read, or modify any other files in your Google Drive.</p>
-
-<h2>Data the app stores</h2>
+<h2>1. Information the app accesses</h2>
+<p>The app authenticates with Google using OAuth 2.0 and requests exactly
+one scope:</p>
 <ul>
-  <li><strong>On your computer:</strong> your Google OAuth tokens (kept in the
-  plugin's local data folder) and a local copy of your song database used to
-  merge changes between machines.</li>
-  <li><strong>In your Google Drive:</strong> the song-library backup files
-  the app uploads, inside a folder the app creates.</li>
+  <li><code>https://www.googleapis.com/auth/drive.file</code> — permission
+  to view and manage <em>only</em> the Google Drive files the app created
+  itself, or that the user explicitly opened with the app.</li>
+</ul>
+<p>Under this scope the app can see, upload, download, and delete its own
+song-library backup files. It <strong>cannot</strong> see, list, read,
+modify, or delete any other file in the user's Google Drive, including
+files owned by other people and shared with the user.</p>
+<p>The app does not request access to the user's Gmail, Google Calendar,
+contacts, profile information, or any other Google service.</p>
+
+<h2>2. Information the app collects and stores</h2>
+<p>All data the app handles stays on the user's own computers and in the
+user's own Google Drive. The developer operates no server and receives
+no data.</p>
+<ul>
+  <li><strong>On the user's computer</strong> (in OpenLP's local plugin
+  data folder):
+    <ul>
+      <li>Google OAuth tokens (access and refresh tokens) used to
+      authenticate Drive uploads and downloads. Tokens are stored only
+      locally and are never transmitted anywhere except to Google's
+      servers during authentication.</li>
+      <li>A local snapshot of the song database used to merge changes
+      between the user's machines.</li>
+      <li>Plugin settings (e.g. sync preferences).</li>
+    </ul>
+  </li>
+  <li><strong>In the user's Google Drive</strong>: the song-library backup
+  files the app uploads, stored in a folder the app creates. These backups
+  contain the user's OpenLP song data (song titles, lyrics, authors,
+  themes, and related metadata the user entered into OpenLP).</li>
 </ul>
 
-<h2>What the developer does with your data</h2>
-<p>Nothing. There is no server, no analytics, no account system, and no
-telemetry. Your data never leaves your computers and your Google Drive. It
-is not sold, shared with third parties, or used for advertising.</p>
+<h2>3. How the information is used</h2>
+<p>Data is used solely to provide the app's core function: keeping the
+user's OpenLP song library synchronized across the user's own computers.
+Specifically:</p>
+<ul>
+  <li>OAuth tokens authenticate the app to Google Drive so it can upload
+  and download backup files.</li>
+  <li>The local song snapshot is compared against Drive backups to merge
+  additions, edits, and deletions between machines.</li>
+</ul>
+<p>The app performs no analytics, no profiling, and no behavioral tracking
+of any kind.</p>
 
-<h2>Data retention and deletion</h2>
-<p>Uninstalling the plugin removes its local data folder, including stored
-tokens. Backup files in your Google Drive remain yours; delete them from
-Drive at any time.</p>
+<h2>4. Information sharing and disclosure</h2>
+<p>The developer does not sell, rent, share, or disclose any user data to
+third parties, because the developer never receives any user data in the
+first place. There is no account system, no telemetry pipeline, and no
+third-party SDK embedded in the app. The only network communication the
+app performs is with Google's OAuth and Drive APIs, governed by
+<a href="https://policies.google.com/privacy">Google's Privacy Policy</a>.</p>
+<p>The app's use of information received from Google APIs adheres to the
+<a href="https://developers.google.com/terms/api-services-user-data-policy">Google
+API Services User Data Policy</a>, including the Limited Use requirements.</p>
 
-<h2>Contact</h2>
-<p>Questions about this policy: open an issue at
-<a href="https://github.com/avandever/openlp-cloudsync">github.com/avandever/openlp-cloudsync</a>.</p>
+<h2>5. Data security</h2>
+<p>OAuth tokens are stored in the user's local OpenLP data folder with
+normal filesystem permissions; backup files in transit use HTTPS. Because
+there is no developer-operated server, there is no central database of
+user data that could be breached. Users are responsible for the security
+of their own computers and Google accounts.</p>
+
+<h2>6. Data retention and deletion</h2>
+<ul>
+  <li><strong>Local data:</strong> uninstalling or removing the plugin
+  deletes its local data folder, including stored OAuth tokens and the
+  song snapshot.</li>
+  <li><strong>Drive backups:</strong> backup files in the user's Google
+  Drive remain the user's property. They can be deleted at any time from
+  Google Drive; deleting them stops synchronization but does not affect
+  the local OpenLP library.</li>
+  <li><strong>Revoking access:</strong> the user can revoke the app's
+  Google access at any time at
+  <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.
+  Revocation immediately invalidates the stored tokens.</li>
+</ul>
+
+<h2>7. Children's privacy</h2>
+<p>The app is a utility for OpenLP operators and is not directed at
+children under 13. It collects no personal information from anyone,
+including children.</p>
+
+<h2>8. Changes to this policy</h2>
+<p>If this policy changes materially, the updated policy will be posted
+at this URL with a revised "Last updated" date. Continued use of the app
+after a change constitutes acceptance of the updated policy.</p>
+
+<h2>9. Contact</h2>
+<p>Questions about this policy or the app's data practices: open an issue
+at <a href="https://github.com/avandever/openlp-cloudsync">github.com/avandever/openlp-cloudsync</a>.</p>
+
+<footer>
+  OpenLP Cloud Sync is an independent open-source project and is not
+  affiliated with or endorsed by OpenLP or Google.
+</footer>
 </body>
 </html>
