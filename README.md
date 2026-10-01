@@ -46,14 +46,12 @@ credentials live in `plugin/cloudsync/client.json`. That file is
    project and an **OAuth client ID** of type *Desktop app*.
 2. Copy `plugin/cloudsync/client.json.example` to
    `plugin/cloudsync/client.json` and fill in your client ID and secret.
-3. Add the scopes the plugin requests (see
-   `plugin/cloudsync/lib/providers.py`):
-   - `https://www.googleapis.com/auth/drive.file` — read/write files the app
-     created (its own backups).
-   - `https://www.googleapis.com/auth/drive.readonly` — read the sync folder's
-     other backups. This is a **restricted** scope: publishing the app beyond
-     personal/testing use requires Google's restricted-scope verification,
-     including an annual third-party security assessment (CASA).
+3. The plugin requests one scope (see `plugin/cloudsync/lib/providers.py`):
+   - `https://www.googleapis.com/auth/drive.file` — read/write only files
+     the app created (its own backups) or the user opened with it. This is
+     a **sensitive** (not restricted) scope, so publishing the app beyond
+     personal/testing use goes through Google's standard verification,
+     with no third-party security assessment required.
 
 While the app is in testing mode, each Google account must be added as a
 test user in the Cloud Console, and sign-in tokens expire after 7 days.

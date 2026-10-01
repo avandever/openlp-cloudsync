@@ -170,10 +170,11 @@ class GoogleDriveProvider(SyncProvider):
 
     Uses the same OAuth "installed app" model as OpenLP Vault: the user
     supplies their own ``credentials.json`` from the Google Cloud Console,
-    and the obtained token is cached locally.  The app can read every file
-    in the Drive account (``drive.readonly``) but only creates, modifies
-    and deletes files of its own (``drive.file``): a backup uploaded by
-    another tool can be downloaded and merged, never altered or removed.
+    and the obtained token is cached locally.  The app can only see files
+    it created or the user opened with it (``drive.file``): both sync
+    machines share one OAuth client, so every backup the plugin uploads
+    counts as app-created and stays visible to both.  Backups dropped into
+    the sync folder by other tools are ignored, never altered or removed.
 
     Drive v3 is called directly over HTTPS with the standard library --
     the frozen OpenLP builds do not ship the Google client libraries.
