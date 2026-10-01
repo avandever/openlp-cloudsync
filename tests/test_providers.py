@@ -404,14 +404,13 @@ def test_list_shared_folders_requires_connection():
         provider.list_shared_folders()
 
 
-def test_drive_scopes_allow_reading_foreign_files():
-    # drive.readonly lets the plugin download backups uploaded by other
-    # tools (e.g. a manual recovery seed); drive.file keeps all writes
-    # scoped to the app's own files.
+def test_drive_scopes_are_file_only():
+    # drive.file alone: the app sees only files it created or the user
+    # opened with it.  Both sync machines share one OAuth client, so every
+    # plugin backup counts as app-created.  Keeping the restricted
+    # drive.readonly scope out is what keeps Google verification free.
     from openlp.plugins.cloudsync.lib.providers import GOOGLE_DRIVE_SCOPES
-    assert 'https://www.googleapis.com/auth/drive.readonly' in GOOGLE_DRIVE_SCOPES
-    assert 'https://www.googleapis.com/auth/drive.file' in GOOGLE_DRIVE_SCOPES
-    assert 'https://www.googleapis.com/auth/drive.metadata.readonly' not in GOOGLE_DRIVE_SCOPES
+    assert GOOGLE_DRIVE_SCOPES == ['https://www.googleapis.com/auth/drive.file']
 
 
 def _http_error(code):

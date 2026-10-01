@@ -270,8 +270,15 @@ def test_read_client_secrets_missing_bundle_raises(monkeypatch):
         auth_module._read_client_secrets()
 
 
-OLD_SCOPES = [
+# v13.5 requested drive.file + drive.readonly.  v13.6 narrowed back to
+# drive.file alone; a token granted the wider set is a superset and keeps
+# working -- narrowing must not force a re-consent.
+WIDER_SCOPES = [
     'https://www.googleapis.com/auth/drive.file',
+    'https://www.googleapis.com/auth/drive.readonly',
+]
+# A token missing drive.file entirely is not sufficient.
+NARROWER_SCOPES = [
     'https://www.googleapis.com/auth/drive.metadata.readonly',
 ]
 
@@ -292,19 +299,31 @@ def test_has_required_scopes_true_for_current_scopes(tmp_path):
 
 
 def test_has_required_scopes_false_for_older_narrower_scopes(tmp_path):
-    # A token granted before the drive.readonly widening must not be
-    # treated as sufficient: API calls needing it would 403.
-    assert auth_module.has_required_scopes(_write_token(tmp_path, OLD_SCOPES)) is False
+    # A token granted without drive.file must not be treated as
+    # sufficient: API calls would 403.
+    assert auth_module.has_required_scopes(_write_token(tmp_path, NARROWER_SCOPES)) is False
+
+
+def test_has_required_scopes_true_for_wider_superset(tmp_path):
+    # Narrowing the requested scopes (v13.5 -> v13.6) must not force a
+    # fresh consent: the old token already covers everything needed.
+    assert auth_module.has_required_scopes(_write_token(tmp_path, WIDER_SCOPES)) is True
 
 
 def test_has_required_scopes_false_when_file_missing(tmp_path):
     assert auth_module.has_required_scopes(tmp_path / 'nope.json') is False
 
 
-def test_scope_widening_forces_fresh_consent(tmp_path):
-    token_path = _write_token(tmp_path, OLD_SCOPES)
+def test_missing_file_scope_forces_fresh_consent(tmp_path):
+    token_path = _write_token(tmp_path, NARROWER_SCOPES)
     assert auth_module.has_valid_token(token_path) is False
     assert auth_module.load_credentials(token_path) is None
+
+
+def test_wider_superset_token_still_loads(tmp_path):
+    token_path = _write_token(tmp_path, WIDER_SCOPES)
+    assert auth_module.has_valid_token(token_path) is True
+    assert auth_module.load_credentials(token_path).token == 'access-1'
 
 
 def test_current_scopes_still_load(tmp_path):

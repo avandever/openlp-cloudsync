@@ -39,12 +39,14 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-# OAuth scopes used for Google Drive: create/upload files the app owns and
-# read metadata for listing.  This is the least-privilege combination that
-# supports sync (same scopes as OpenLP Vault).
+# OAuth scope used for Google Drive: the app may view and manage only the
+# files it created or the user opened with it.  Both sync machines share one
+# OAuth client, so every backup the plugin uploads counts as app-created and
+# stays visible to both.  drive.file is a *sensitive* (not restricted)
+# scope, which keeps Google verification free -- drive.readonly would force
+# a paid CASA assessment.
 GOOGLE_DRIVE_SCOPES = [
     'https://www.googleapis.com/auth/drive.file',
-    'https://www.googleapis.com/auth/drive.readonly',
 ]
 
 
