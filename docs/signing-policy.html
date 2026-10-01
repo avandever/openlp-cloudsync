@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code Signing Policy — OpenLP Cloud Sync</title>
+<style>
+body { font-family: system-ui, -apple-system, sans-serif; max-width: 44em;
+       margin: 2em auto; padding: 0 1em; line-height: 1.65; color: #222; }
+h1 { font-size: 1.6em; }
+h2 { font-size: 1.2em; margin-top: 1.75em; }
+.muted { color: #666; }
+footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd;
+         color: #666; font-size: 0.9em; }
+code { background: #f4f4f4; padding: 0.1em 0.35em; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>Code Signing Policy</h1>
+<p class="muted">Last updated: October 1, 2026</p>
+
+<h2>What is signed</h2>
+<p>Every Windows installer (<code>CloudSync-Setup-*.exe</code>) published on the
+<a href="https://github.com/avandever/openlp-cloudsync/releases">GitHub releases page</a>
+is Authenticode code-signed before release. The signature lets Windows verify
+the installer genuinely comes from this project and has not been tampered with.</p>
+
+<h2>How signing works</h2>
+<ul>
+  <li>Release installers are built by GitHub Actions from the public source at
+  <a href="https://github.com/avandever/openlp-cloudsync">github.com/avandever/openlp-cloudsync</a>.
+  No binaries are ever signed from a developer's local machine.</li>
+  <li>Signing is performed by the <a href="https://signpath.org/">SignPath
+  Foundation</a> free code-signing service for open-source projects. The
+  certificate is held in SignPath's hardware security module; the project
+  maintainer never handles the private key.</li>
+  <li>SignPath verifies that each submitted binary was produced by the project's
+  own GitHub Actions build before signing it.</li>
+  <li>Signatures are timestamped, so they remain valid after the certificate
+  itself expires.</li>
+</ul>
+
+<h2>Publisher identity</h2>
+<p>Signed installers show <strong>SignPath Foundation</strong> as the publisher.
+This project (OpenLP Cloud Sync, by Andrew Vandever) does not hold its own
+code-signing certificate; identity is vouched for by the SignPath Foundation
+under its <a href="https://signpath.org/terms.html">terms for open-source
+projects</a>.</p>
+
+<h2>Verifying a download</h2>
+<p>Right-click the installer → Properties → Digital Signatures. You should see a
+signature from SignPath Foundation with a valid timestamp. If the signature is
+missing or invalid, do not run the file — download it again from the releases
+page above and report the problem on
+<a href="https://github.com/avandever/openlp-cloudsync/issues">GitHub</a>.</p>
+
+<footer>
+  <a href="/">Home</a> · <a href="/privacy.html">Privacy Policy</a>
+</footer>
+</body>
+</html>
