@@ -54,8 +54,7 @@ from openlp.core.common.registry import Registry
 from openlp.core.threading import is_thread_finished
 from openlp.core.threading import run_thread as _openlp_run_thread
 from . import auth as auth_module
-from .backup import (CLOUDSYNC_META_FILENAME, PLUGIN_SECTION_DIR, SQLITE_SUFFIXES,
-                     compute_fingerprint, create_library_archive)
+from .backup import CLOUDSYNC_META_FILENAME, compute_fingerprint, compute_sha256, create_library_archive
 from .providers import RemoteBackup, get_provider
 from .restore import discard_pending_restore, has_pending_restore
 from .songmerge import find_songs_db
@@ -83,6 +82,14 @@ def _start_worker_thread(worker, thread_name, queued_connections=()):
             signal.connect(slot)
         _openlp_run_thread(worker, thread_name)
 
+
+# The only archive members a download ever reads: the songs database (at
+# either location :func:`songmerge.find_songs_db` checks) and the sync
+# metadata.  Anything else in a downloaded archive is ignored -- a backup
+# comes from a shared cloud folder and must never be able to write
+# arbitrary files (e.g. a plugin under ``contrib/plugins/``) onto this
+# machine.
+SYNC_ARCHIVE_MEMBERS = ('songs/songs.sqlite', 'songs.sqlite', CLOUDSYNC_META_FILENAME)
 
 SyncResult = namedtuple('SyncResult', ['success', 'action', 'message'])
 # action is one of: 'skipped', 'uploaded', 'downloaded', 'in-sync', 'error'
@@ -375,8 +382,7 @@ class SyncController(QtCore.QObject):
         """
         Check for a newer remote backup, download it, and apply it live:
         its songs are merged into the running library (three-way when a
-        merge base exists) and the song list refreshes in place; its other
-        non-database files are copied over the data directory.  No restart
+        merge base exists) and the song list refreshes in place.  No restart
         is needed.
 
         :return: :class:`SyncResult`.
@@ -398,8 +404,8 @@ class SyncController(QtCore.QObject):
                 host=remote.hostname))
             work_dir = Path(tempfile.mkdtemp(prefix='openlp-cloudsync-'))
             try:
-                download_path = work_dir / remote.name
-                provider.download_backup(remote, download_path)
+                download_path = work_dir / 'download.zip'
+                self._download_verified(provider, remote, download_path)
                 message = self._apply_downloaded_archive(remote, download_path, status)
             finally:
                 shutil.rmtree(work_dir, ignore_errors=True)
@@ -408,6 +414,34 @@ class SyncController(QtCore.QObject):
         except Exception as error:
             log.exception('Cloud sync remote check failed')
             return SyncResult(False, 'error', translate('CloudSync', 'Download failed: {error}').format(error=error))
+
+    @staticmethod
+    def _download_verified(provider, remote, download_path):
+        """
+        Download *remote* to *download_path* and check it against the
+        checksum recorded at upload time.
+
+        Backups uploaded by other tools carry no checksum; those are
+        accepted unchecked.
+
+        :raises ValueError: When the downloaded file does not match.
+        """
+        provider.download_backup(remote, download_path)
+        if remote.sha256 and compute_sha256(download_path) != remote.sha256:
+            raise ValueError('Downloaded backup {name} failed its checksum check; '
+                             'not applying it'.format(name=remote.name))
+
+    @staticmethod
+    def _extract_sync_members(archive_path, extract_dir):
+        """
+        Extract only the members listed in :data:`SYNC_ARCHIVE_MEMBERS`
+        from a downloaded archive into *extract_dir*.
+        """
+        with zipfile.ZipFile(str(archive_path), 'r') as archive:
+            names = set(archive.namelist())
+            for member in SYNC_ARCHIVE_MEMBERS:
+                if member in names:
+                    archive.extract(member, str(extract_dir))
 
     @staticmethod
     def _remote_base_identities(extract_dir):
@@ -433,9 +467,9 @@ class SyncController(QtCore.QObject):
     def _apply_downloaded_archive(self, remote, archive_path, status_callback=None):
         """
         Apply a downloaded library archive live: merge its songs into the
-        local songs database (three-way when a merge base exists), copy its
-        non-database files over the data directory, then record the new
-        sync state and merge base.
+        local songs database (three-way when a merge base exists), then
+        record the new sync state and merge base.  Nothing else from the
+        archive is written to disk.
 
         :param remote: :class:`RemoteBackup` describing the archive.
         :param archive_path: Path of the downloaded zip file.
@@ -447,8 +481,7 @@ class SyncController(QtCore.QObject):
         with tempfile.TemporaryDirectory(prefix='openlp-cloudsync-apply-') as tmp_dir:
             extract_dir = Path(tmp_dir) / 'extracted'
             extract_dir.mkdir()
-            with zipfile.ZipFile(str(archive_path), 'r') as archive:
-                archive.extractall(str(extract_dir))
+            self._extract_sync_members(archive_path, extract_dir)
             remote_songs_db = find_songs_db(extract_dir)
             local_songs_db = find_songs_db(data_dir)
             if remote_songs_db is not None and local_songs_db is not None:
@@ -463,9 +496,8 @@ class SyncController(QtCore.QObject):
                 log.info('Cloud sync: applied download from %s: %d added, %d updated, %d deleted',
                          remote.hostname, report['added'], report['updated'], report['deleted'])
             else:
-                log.warning('Cloud sync: no songs database to merge (remote: %s, local: %s); '
-                            'copying files only', remote_songs_db, local_songs_db)
-            self._copy_archive_files(extract_dir, data_dir)
+                log.warning('Cloud sync: no songs database to merge (remote: %s, local: %s)',
+                            remote_songs_db, local_songs_db)
         # The local library now matches the applied remote backup: record it
         # as both the local fingerprint and the newest seen remote backup, so
         # the next sync does not re-download the backup just applied.
@@ -492,38 +524,6 @@ class SyncController(QtCore.QObject):
         return translate('CloudSync', 'Downloaded library from {host}.').format(
             host=remote.hostname)
 
-    @staticmethod
-    def _copy_archive_files(extract_dir, data_dir):
-        """
-        Copy a downloaded archive's non-database files over the data
-        directory.
-
-        Sqlite databases are skipped: the songs database was already merged
-        above, and other databases (bibles, ...) may be open in another
-        plugin -- replacing them while OpenLP is running is unsafe.  The
-        plugin's own section directory is skipped too.  Individual copy
-        failures (e.g. a locked media file) are logged and skipped.
-        """
-        data_dir = Path(data_dir)
-        for source in sorted(extract_dir.rglob('*')):
-            if not source.is_file():
-                continue
-            relative = source.relative_to(extract_dir)
-            if relative.parts and relative.parts[0] == PLUGIN_SECTION_DIR:
-                continue
-            if relative.name == CLOUDSYNC_META_FILENAME:
-                # Sync metadata for the merge; never copied into the data dir.
-                continue
-            if source.suffix.lower() in SQLITE_SUFFIXES:
-                log.debug('Cloud sync: skipping database file %s (not synced live)', relative)
-                continue
-            target = data_dir / relative
-            try:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(source), str(target))
-            except OSError:
-                log.warning('Cloud sync: could not copy %s, skipping', relative)
-
     def _apply_pending_restore(self, marker, status_callback=None):
         """
         Apply a v12-staged download through the live path.
@@ -537,7 +537,6 @@ class SyncController(QtCore.QObject):
             :func:`restore.has_pending_restore`.
         :return: Human-readable summary message.
         """
-        from .backup import compute_sha256
         from .restore import STAGED_ARCHIVE_FILENAME, pending_restore_archive_path
         backup_meta = marker.get('backup') or {}
         staged = pending_restore_archive_path(self.data_dir, marker)
@@ -647,12 +646,11 @@ class SyncController(QtCore.QObject):
         status(translate('CloudSync', 'Downloading cloud library for merge...'))
         work_dir = Path(tempfile.mkdtemp(prefix='openlp-cloudsync-merge-'))
         try:
-            download_path = work_dir / remote.name
-            provider.download_backup(remote, download_path)
+            download_path = work_dir / 'download.zip'
+            self._download_verified(provider, remote, download_path)
             extract_dir = work_dir / 'remote'
             extract_dir.mkdir()
-            with zipfile.ZipFile(str(download_path), 'r') as archive:
-                archive.extractall(str(extract_dir))
+            self._extract_sync_members(download_path, extract_dir)
             remote_songs_db = find_songs_db(extract_dir)
             if remote_songs_db is None:
                 raise ValueError('Remote backup has no songs database')

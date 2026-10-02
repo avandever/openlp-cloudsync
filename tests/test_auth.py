@@ -20,6 +20,7 @@ The contract under test:
   refreshes expired tokens.
 """
 import json
+import os
 import threading
 import time
 import urllib.parse
@@ -85,10 +86,11 @@ def fake_token_exchange(monkeypatch):
     """Pretend Google's token endpoint; return the canned token response."""
     calls = []
 
-    def exchange(token_uri, client_id, client_secret, code, redirect_uri, timeout=30):
+    def exchange(token_uri, client_id, client_secret, code, redirect_uri, code_verifier,
+                 timeout=30):
         calls.append({
             'token_uri': token_uri, 'client_id': client_id, 'code': code,
-            'redirect_uri': redirect_uri,
+            'redirect_uri': redirect_uri, 'code_verifier': code_verifier,
         })
         assert code == 'auth-code-123'
         return {
@@ -122,6 +124,15 @@ def test_run_oauth_flow_happy_path(bundled_secrets, tmp_path, fake_token_exchang
     assert params['redirect_uri'][0].startswith('http://127.0.0.1:')
     assert 'drive.file' in params['scope'][0]
     assert params['state'][0]  # state present for the round-trip check
+    # PKCE: the URL carries the S256 challenge of the verifier the code
+    # exchange sends.
+    import base64
+    import hashlib
+    verifier = fake_token_exchange[0]['code_verifier']
+    assert 43 <= len(verifier) <= 128
+    expected = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=')
+    assert params['code_challenge_method'] == ['S256']
+    assert params['code_challenge'] == [expected.decode()]
     # Code exchange used the token endpoint from the secrets file.
     assert fake_token_exchange[0]['token_uri'] == 'https://oauth2.google.example/token'
     assert fake_token_exchange[0]['client_id'] == 'test-client-id'
@@ -147,6 +158,70 @@ def test_run_oauth_flow_state_mismatch_fails_closed(
     assert 'state' in str(excinfo.value).lower()
     assert fake_token_exchange == []  # no code exchange attempted
     assert not token_path.exists()
+
+
+def test_stray_request_does_not_end_oauth_flow(bundled_secrets, tmp_path, fake_token_exchange):
+    """A browser's /favicon.ico (or any non-redirect hit) gets a 404 and the
+    flow keeps waiting for the real redirect."""
+    import urllib.error
+    real_opener = make_browser_opener({'code': 'auth-code-123'}, delay=0.5)
+    stray_status = []
+
+    def opener(auth_url):
+        redirect_uri = urllib.parse.parse_qs(urllib.parse.urlparse(auth_url).query)['redirect_uri'][0]
+
+        def stray():
+            try:
+                urllib.request.urlopen(redirect_uri + 'favicon.ico', timeout=10)
+            except urllib.error.HTTPError as error:
+                stray_status.append(error.code)
+
+        threading.Thread(target=stray, daemon=True).start()
+        real_opener(auth_url)
+
+    credentials = auth_module.run_oauth_flow(
+        str(tmp_path / 'token.json'), browser_opener=opener, timeout_seconds=10)
+
+    assert credentials.token == 'access-abc'
+    assert stray_status == [404]
+
+
+def test_callback_page_reports_failure(bundled_secrets, tmp_path, fake_token_exchange):
+    """The browser tab must not claim success when sign-in failed."""
+    pages = []
+
+    def opener(auth_url):
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(auth_url).query)
+        callback = params['redirect_uri'][0] + '?' + urllib.parse.urlencode(
+            {'error': 'access_denied', 'state': params['state'][0]})
+
+        def visit():
+            time.sleep(0.2)
+            pages.append(urllib.request.urlopen(callback, timeout=10).read().decode('utf-8'))
+
+        threading.Thread(target=visit, daemon=True).start()
+
+    with pytest.raises(auth_module.AuthenticationCancelledError):
+        auth_module.run_oauth_flow(
+            str(tmp_path / 'token.json'), browser_opener=opener, timeout_seconds=10)
+
+    deadline = time.time() + 5
+    while not pages and time.time() < deadline:
+        time.sleep(0.05)
+    assert pages and 'could not connect' in pages[0]
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX file modes only')
+def test_saved_token_is_private(tmp_path):
+    token_path = tmp_path / 'token.json'
+    token_path.write_text('{}')
+    token_path.chmod(0o644)  # left behind by an older version
+
+    auth_module.save_credentials(
+        auth_module.OAuthCredentials('t', 'r', 'https://x', 'c', 's'), token_path)
+
+    assert token_path.stat().st_mode & 0o777 == 0o600
+    assert json.loads(token_path.read_text())['refresh_token'] == 'r'
 
 
 def test_run_oauth_flow_user_denial_is_cancellation(
@@ -330,3 +405,18 @@ def test_current_scopes_still_load(tmp_path):
     token_path = _write_token(tmp_path, GOOGLE_DRIVE_SCOPES)
     assert auth_module.has_valid_token(token_path) is True
     assert auth_module.load_credentials(token_path).token == 'access-1'
+
+
+def test_exchange_code_sends_pkce_verifier(monkeypatch):
+    sent = []
+
+    def post_form(url, payload, timeout=30):
+        sent.append(urllib.parse.parse_qs(payload.decode('ascii')))
+        return {'access_token': 'a'}
+
+    monkeypatch.setattr(auth_module, '_post_form', post_form)
+
+    auth_module._exchange_code('https://t', 'cid', 'cs', 'code-1', 'http://127.0.0.1:1/', 'verifier-xyz')
+
+    assert sent[0]['code_verifier'] == ['verifier-xyz']
+    assert sent[0]['grant_type'] == ['authorization_code']

@@ -1,0 +1,7 @@
+version: 2
+updates:
+  # Bump the commit SHAs the workflows pin GitHub Actions to.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

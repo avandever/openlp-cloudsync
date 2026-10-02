@@ -35,9 +35,12 @@ not ship the Google client libraries, and requiring users to ``pip
 install`` into a frozen app is not viable.  The OAuth "installed app"
 exchange and the Drive REST calls are small enough to implement directly.
 """
+import base64
 import datetime
+import hashlib
 import json
 import logging
+import os
 import secrets
 import socket
 import time
@@ -277,32 +280,51 @@ def load_credentials(token_path):
 
 def save_credentials(credentials, token_path):
     """
-    Persist OAuth credentials to disk.
+    Persist OAuth credentials to disk, readable by the current user only
+    (the file holds a long-lived refresh token).
 
     :param credentials: An :class:`OAuthCredentials` instance.
     :param token_path: Destination path for the token file.
     """
     token_path = Path(token_path)
     token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(credentials.to_json(), encoding='utf-8')
+    descriptor = os.open(str(token_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
+        stream.write(credentials.to_json())
+    # os.open's mode only applies to new files: tighten a token file left
+    # behind by an older version too.
+    os.chmod(str(token_path), 0o600)
     log.debug('OAuth token saved to %s', token_path)
 
 
 class _OAuthCallbackHandler(BaseHTTPRequestHandler):
     """
-    Captures the single OAuth redirect, then shows a "done" page.
+    Captures the single OAuth redirect, then shows a result page.
+
+    Requests that are not an OAuth redirect (a browser's ``/favicon.ico``,
+    a stray local request) get a 404 and do not end the flow.
     """
     # Set by _start_redirect_server before serving: dict-like result store.
+    # May hold the expected ``'state'`` so the page can report failure.
     result = None
 
     def do_GET(self):
         query = urllib.parse.urlparse(self.path).query
-        params = urllib.parse.parse_qs(query)
-        self.result['params'] = {key: values[0] for key, values in params.items()}
+        params = {key: values[0] for key, values in urllib.parse.parse_qs(query).items()}
+        if not any(key in params for key in ('code', 'error', 'state')):
+            self.send_error(404)
+            return
+        self.result['params'] = params
+        succeeded = ('code' in params and 'error' not in params
+                     and params.get('state') == self.result.get('state'))
+        if succeeded:
+            heading = 'OpenLP Cloud Sync is connected.'
+        else:
+            heading = 'OpenLP Cloud Sync could not connect.'
         body = ('<html><body style="font-family:sans-serif">'
-                '<h2>OpenLP Cloud Sync is connected.</h2>'
+                '<h2>{heading}</h2>'
                 '<p>You can close this tab and return to OpenLP.</p>'
-                '</body></html>').encode('utf-8')
+                '</body></html>').format(heading=heading).encode('utf-8')
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
@@ -314,14 +336,16 @@ class _OAuthCallbackHandler(BaseHTTPRequestHandler):
         pass
 
 
-def _start_redirect_server():
+def _start_redirect_server(expected_state=None):
     """
     Bind the OAuth redirect receiver on an ephemeral loopback port.
 
+    :param expected_state: The OAuth ``state`` sent to Google, used only to
+        choose the result page shown in the browser.
     :return: ``(server, port, result)`` where *result* will hold the
         redirect's query parameters under ``'params'`` once received.
     """
-    result = {}
+    result = {'state': expected_state}
     handler = type('_BoundOAuthCallbackHandler', (_OAuthCallbackHandler,), {'result': result})
     server = HTTPServer(('127.0.0.1', 0), handler)
     server.timeout = 1.0
@@ -393,7 +417,25 @@ def _read_client_secrets():
             section.get('token_uri') or DEFAULT_TOKEN_URI)
 
 
-def _exchange_code(token_uri, client_id, client_secret, code, redirect_uri, timeout=30):
+def _pkce_pair():
+    """
+    Generate a PKCE (RFC 7636) code verifier and its S256 challenge.
+
+    The challenge goes in the authorisation URL and the verifier in the code
+    exchange, so an intercepted authorisation code is useless on its own --
+    the bundled client secret is not secret, so it cannot provide that
+    protection.
+
+    :return: ``(code_verifier, code_challenge)``.
+    """
+    verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(verifier.encode('ascii')).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b'=').decode('ascii')
+    return verifier, challenge
+
+
+def _exchange_code(token_uri, client_id, client_secret, code, redirect_uri, code_verifier,
+                   timeout=30):
     """
     Exchange an OAuth authorisation code for tokens.
 
@@ -405,6 +447,7 @@ def _exchange_code(token_uri, client_id, client_secret, code, redirect_uri, time
         'client_id': client_id,
         'client_secret': client_secret,
         'code': code,
+        'code_verifier': code_verifier,
         'redirect_uri': redirect_uri,
     }).encode('ascii')
     data = _post_form(token_uri, payload, timeout=timeout)
@@ -443,9 +486,10 @@ def run_oauth_flow(token_path, status_callback=None, timeout_seconds=300,
     log.info('Opening default browser for Google OAuth consent')
 
     state = secrets.token_urlsafe(24)
+    code_verifier, code_challenge = _pkce_pair()
     # Bind the redirect receiver first so the redirect URI (with its
     # ephemeral loopback port) is known before the browser opens.
-    server, port, result = _start_redirect_server()
+    server, port, result = _start_redirect_server(state)
     redirect_uri = 'http://127.0.0.1:{port}/'.format(port=port)
     auth_url = auth_uri + '?' + urllib.parse.urlencode({
         'client_id': client_id,
@@ -455,6 +499,8 @@ def run_oauth_flow(token_path, status_callback=None, timeout_seconds=300,
         'access_type': 'offline',
         'prompt': 'consent',
         'state': state,
+        'code_challenge': code_challenge,
+        'code_challenge_method': 'S256',
     })
 
     opener = browser_opener or (lambda url: webbrowser.open(url, new=1, autoraise=True))
@@ -477,7 +523,7 @@ def run_oauth_flow(token_path, status_callback=None, timeout_seconds=300,
     if not code:
         raise AuthenticationError('Google did not return an authorisation code.')
 
-    data = _exchange_code(token_uri, client_id, client_secret, code, redirect_uri)
+    data = _exchange_code(token_uri, client_id, client_secret, code, redirect_uri, code_verifier)
     credentials = OAuthCredentials(
         token=data['access_token'],
         refresh_token=data.get('refresh_token'),

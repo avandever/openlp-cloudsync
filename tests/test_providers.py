@@ -29,12 +29,12 @@ class FakeResponse:
     def __init__(self, body, headers=None, content_type='application/json'):
         if isinstance(body, dict):
             body = json.dumps(body).encode('utf-8')
-        self._body = body
+        self._body = io.BytesIO(body)
         self.headers = FakeHeaders(headers or {})
         self.headers.setdefault('Content-Type', content_type)
 
-    def read(self):
-        return self._body
+    def read(self, size=-1):
+        return self._body.read(size)
 
     def __enter__(self):
         return self
@@ -54,6 +54,9 @@ class FakeTransport:
         self.requests = []
 
     def __call__(self, request, timeout=None):
+        # Streamed bodies are file objects consumed (and closed) by the
+        # caller: snapshot them now, as the real transport would send them.
+        request.sent_body = request.data.read() if hasattr(request.data, 'read') else request.data
         self.requests.append(request)
         if not self.script:
             raise AssertionError('Unexpected request: {m} {u}'.format(
@@ -215,7 +218,29 @@ def test_upload_backup_uses_resumable_session(provider, monkeypatch, tmp_path):
     put_request = transport.requests[2]
     assert put_request.get_method() == 'PUT'
     assert put_request.full_url == 'https://upload.example/session-1'
-    assert put_request.data == b'ZIP' * 100
+    # ...streamed from the file (not read into memory) with an explicit length.
+    assert hasattr(put_request.data, 'read')
+    assert put_request.sent_body == b'ZIP' * 100
+    assert put_request.headers['Content-length'] == '300'
+
+
+def test_streamed_upload_rewinds_on_token_refresh_retry(provider, monkeypatch, tmp_path):
+    archive = tmp_path / 'openlp-library-x.zip'
+    archive.write_bytes(b'ZIP' * 100)
+    monkeypatch.setattr(provider._credentials, 'refresh', lambda: None)
+    transport = FakeTransport([
+        (FakeResponse({'files': [{'id': 'folder-9', 'name': 'OpenLP'}]}), None),
+        (FakeResponse({}, headers={'Location': 'https://upload.example/session-1'}), None),
+        (urllib.error.HTTPError('https://upload.example/session-1', 401, 'expired', {},
+                                io.BytesIO(b'')), None),
+        (FakeResponse(drive_file('f-up', name='openlp-library-x.zip')), None),
+    ])
+    monkeypatch.setattr('urllib.request.urlopen', transport)
+
+    provider.upload_backup(archive, {'name': 'openlp-library-x.zip'}, 'OpenLP')
+
+    assert transport.requests[2].sent_body == b'ZIP' * 100
+    assert transport.requests[3].sent_body == b'ZIP' * 100
 
 
 def test_download_backup_writes_bytes(provider, monkeypatch, tmp_path):
@@ -449,3 +474,36 @@ def test_403_error_points_at_reconsent(provider, monkeypatch):
     with pytest.raises(DriveHttpError) as excinfo:
         provider.list_backups('OpenLP')
     assert 'sign back in' in str(excinfo.value)
+
+
+def test_download_backup_streams_large_body_in_chunks(provider, monkeypatch, tmp_path):
+    from openlp.plugins.cloudsync.lib import providers as providers_module
+    body = bytes(range(256)) * 50
+    response = FakeResponse(body, content_type='application/zip')
+    reads = []
+    original_read = response.read
+
+    def tracking_read(size=-1):
+        reads.append(size)
+        return original_read(size)
+
+    response.read = tracking_read
+    monkeypatch.setattr(providers_module, 'DOWNLOAD_CHUNK_SIZE', 1000)
+    monkeypatch.setattr('urllib.request.urlopen', FakeTransport([(response, None)]))
+    destination = tmp_path / 'openlp-library-x.zip'
+
+    provider.download_backup(RemoteBackup('f-1', 'openlp-library-x.zip', 'pc',
+                                          '2026-09-29T21:00:00Z', 'abc', len(body)), destination)
+
+    assert destination.read_bytes() == body
+    assert reads and all(size == 1000 for size in reads)
+
+
+def test_folder_name_query_escapes_backslash_and_quote(provider, monkeypatch):
+    transport = FakeTransport([(FakeResponse({'files': [{'id': 'f-1', 'name': 'x'}]}), None)])
+    monkeypatch.setattr('urllib.request.urlopen', transport)
+
+    provider._resolve_folder_id(r"Bob's \ folder")
+
+    _, _, query, _, _ = transport.last_request_parts()
+    assert r"name = 'Bob\'s \\ folder'" in query['q'][0]
