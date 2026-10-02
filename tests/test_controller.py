@@ -20,13 +20,18 @@ from openlp.plugins.cloudsync.lib.synccontroller import SyncController
 class FakeProvider(SyncProvider):
     """In-memory SyncProvider for tests."""
 
-    def __init__(self, backups=None, list_error=None, zip_songs=(), zip_files=None):
+    def __init__(self, backups=None, list_error=None, zip_songs=(), zip_files=None,
+                 corrupt_download=False):
         self._backups = list(backups or [])
         self._list_error = list_error
         # Songs (make_db dicts) baked into songs/songs.sqlite in the
         # downloaded zip, plus extra {arcname: bytes} entries.
         self._zip_songs = list(zip_songs)
         self._zip_files = dict(zip_files or {})
+        # The zip is built at download time, so its real checksum is only
+        # known then: stamp it onto the backup (as the uploader would have),
+        # unless the test wants a download that fails verification.
+        self._corrupt_download = corrupt_download
         self.uploaded = []
         self.downloaded = []
         self.deleted = []
@@ -68,6 +73,9 @@ class FakeProvider(SyncProvider):
                     archive.write(str(db_path), 'songs/songs.sqlite')
                 for arcname, data in self._zip_files.items():
                     archive.writestr(arcname, data)
+        if backup.sha256 and not self._corrupt_download:
+            from openlp.plugins.cloudsync.lib.backup import compute_sha256
+            backup.sha256 = compute_sha256(destination_path)
         self.downloaded.append((backup, destination_path))
 
     def delete_backup(self, backup):
@@ -261,36 +269,66 @@ class TestPerformRemoteCheck:
         assert state['local_fingerprint'] == compute_fingerprint(tmp_path)
         assert controller.perform_remote_check(provider).action == 'in-sync'
 
-    def test_download_copies_files_but_skips_sqlite(self, controller, tmp_path):
+    def test_download_writes_nothing_but_the_merge(self, controller, tmp_path):
+        # A backup comes from a shared cloud folder: extra archive members
+        # must never land on disk -- above all a plugin, which OpenLP would
+        # load (and run) on its next start.
         (tmp_path / 'songs').mkdir()
-        (tmp_path / 'themes').mkdir()
         backup = make_backup()
         provider = FakeProvider(
             [backup],
             zip_files={
                 'themes/custom.otz': b'theme-bytes',
+                'contrib/plugins/evil/evilplugin.py': b'import os',
+                'contrib/plugins/cloudsync/cloudsyncplugin.py': b'import os',
+                'CloudSync/token.json': b'{}',
                 'bibles/bible.sqlite': b'sqlite-bytes',
-                'cloudsync/should-not-copy.txt': b'nope',
             },
         )
         result = controller.perform_remote_check(provider)
         assert result.success is True
-        # Plain files are copied over the data dir...
-        assert (tmp_path / 'themes' / 'custom.otz').read_bytes() == b'theme-bytes'
-        # ...but sqlite databases are never replaced live (they may be open
-        # in another plugin), and the plugin's own section dir is skipped.
-        assert not (tmp_path / 'bibles' / 'bible.sqlite').exists()
-        assert not (tmp_path / 'cloudsync' / 'should-not-copy.txt').exists()
+        assert not (tmp_path / 'themes').exists()
+        assert not (tmp_path / 'contrib').exists()
+        assert not (tmp_path / 'bibles').exists()
+        assert not (tmp_path / 'CloudSync' / 'token.json').exists()
+        assert not (tmp_path / 'cloudsync' / 'token.json').exists()
 
-    def test_download_without_songs_db_still_applies_files(self, controller, tmp_path):
+    def test_download_without_songs_db_succeeds_without_merge(self, controller, tmp_path):
         (tmp_path / 'songs').mkdir()
         backup = make_backup()
         provider = FakeProvider([backup], zip_files={'themes/custom.otz': b'theme-bytes'})
         result = controller.perform_remote_check(provider)
         assert result.success is True
         assert 'remote-pc' in result.message
-        assert (tmp_path / 'themes' / 'custom.otz').read_bytes() == b'theme-bytes'
         assert controller.merge_applied is False
+
+    def test_download_with_bad_checksum_is_not_applied(self, controller, tmp_path):
+        from tests.openlp_plugins.cloudsync.test_songmerge import make_db, song_titles
+        songs_dir = tmp_path / 'songs'
+        songs_dir.mkdir()
+        make_db(songs_dir / 'songs.sqlite',
+                [{'id': 1, 'title': 'Local Song', 'authors': ['Me'],
+                  'lyrics': 'local words', 'last_modified': '2026-09-01 00:00:00'}])
+        backup = make_backup(sha256='not-the-real-checksum')
+        provider = FakeProvider(
+            [backup], corrupt_download=True,
+            zip_songs=[{'id': 9, 'title': 'Remote Song', 'authors': ['You'],
+                        'lyrics': 'remote words', 'last_modified': '2026-09-02 00:00:00'}])
+        result = controller.perform_remote_check(provider)
+        assert result.success is False
+        assert 'checksum' in result.message
+        assert song_titles(songs_dir / 'songs.sqlite') == ['Local Song']
+        assert load_state(tmp_path)['applied_remote_sha256'] is None
+
+    def test_download_path_ignores_remote_file_name(self, controller, tmp_path):
+        # Drive file names are remote data: a name with path separators
+        # must not steer where the download is written.
+        (tmp_path / 'songs').mkdir()
+        backup = make_backup(name='openlp-library-/../../escaped.zip')
+        provider = FakeProvider([backup])
+        controller.perform_remote_check(provider)
+        written = provider.downloaded[0][1]
+        assert written.name == 'download.zip'
 
     def test_download_without_remote_base_never_deletes(self, controller, tmp_path):
         # Regression: a remote backup whose uploader never synced (no
@@ -554,8 +592,9 @@ class TestMergeFlow:
             def download_backup(self, backup, destination_path):
                 shutil.copy(str(remote_zip), str(destination_path))
 
+        from openlp.plugins.cloudsync.lib.backup import compute_sha256
         provider = MergeProvider(backups=[make_backup(created_utc='2026-09-29T22:00:00Z',
-                                                      sha256='remote-sha')])
+                                                      sha256=compute_sha256(remote_zip))])
         monkeypatch.setattr(controller, '_connect_provider', lambda: provider)
 
         result = controller.perform_startup_sync()

@@ -32,6 +32,7 @@ plugin works inside the frozen OpenLP builds.
 """
 import json
 import logging
+import shutil
 import urllib.parse
 import urllib.request
 from abc import ABC, abstractmethod
@@ -48,6 +49,17 @@ log = logging.getLogger(__name__)
 GOOGLE_DRIVE_SCOPES = [
     'https://www.googleapis.com/auth/drive.file',
 ]
+
+# Bytes per read when streaming a download to disk.
+DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+
+
+def _quote_query_value(value):
+    """
+    Escape a string for use inside single quotes in a Drive ``q`` query:
+    backslashes first, then single quotes.
+    """
+    return value.replace('\\', '\\\\').replace("'", "\\'")
 
 
 class DriveHttpError(RuntimeError):
@@ -204,11 +216,17 @@ class GoogleDriveProvider(SyncProvider):
             raise RuntimeError('Google Drive provider is not connected')
 
     def _request(self, method, url, params=None, json_body=None, raw_body=None,
-                 content_type=None, extra_headers=None, timeout=120):
+                 content_type=None, extra_headers=None, timeout=120, download_to=None):
         """
         Perform one authorised Drive API call, refreshing the token once on
         a 401 and returning the parsed JSON response (or raw bytes for
         downloads).
+
+        :param raw_body: Request body as bytes or a seekable binary file
+            (streamed; the caller must send ``Content-Length``).
+        :param download_to: Optional path: stream the response body there
+            instead of reading it into memory; the path is returned in place
+            of the payload.
 
         :raises DriveHttpError: On API or transport failures.
         """
@@ -228,12 +246,19 @@ class GoogleDriveProvider(SyncProvider):
                 body = json.dumps(json_body).encode('utf-8')
                 headers['Content-Type'] = 'application/json; charset=utf-8'
             elif raw_body is not None:
+                if hasattr(raw_body, 'seek'):
+                    # Rewind for the retry after a token refresh.
+                    raw_body.seek(0)
                 body = raw_body
                 if content_type:
                     headers['Content-Type'] = content_type
             request = urllib.request.Request(url, data=body, headers=headers, method=method)
             try:
                 with urllib.request.urlopen(request, timeout=timeout) as response:
+                    if download_to is not None:
+                        with open(download_to, 'wb') as stream:
+                            shutil.copyfileobj(response, stream, DOWNLOAD_CHUNK_SIZE)
+                        return download_to, dict(response.headers)
                     payload = response.read()
                     response_headers = dict(response.headers)
                     content_kind = response.headers.get_content_type()
@@ -280,7 +305,7 @@ class GoogleDriveProvider(SyncProvider):
             self._folder_cache[folder_ref] = folder_id
             return folder_id
         query = ("mimeType = 'application/vnd.google-apps.folder' and "
-                 "name = '{name}' and trashed = false".format(name=folder_ref.replace("'", "\\'")))
+                 "name = '{name}' and trashed = false".format(name=_quote_query_value(folder_ref)))
         response, _ = self._request('GET', self.DRIVE_API, params={
             'q': query, 'spaces': 'drive', 'fields': 'files(id, name)'})
         files = response.get('files', [])
@@ -326,7 +351,7 @@ class GoogleDriveProvider(SyncProvider):
         :return: List of :class:`DriveFolder`, sorted by name.
         """
         self._require_credentials()
-        parent = "'root'" if parent_id is None else "'{pid}'".format(pid=parent_id)
+        parent = "'root'" if parent_id is None else "'{pid}'".format(pid=_quote_query_value(parent_id))
         query = ("mimeType = 'application/vnd.google-apps.folder' and "
                  "{parent} in parents and trashed = false".format(parent=parent))
         return self._list_folders_by_query(query)
@@ -393,7 +418,7 @@ class GoogleDriveProvider(SyncProvider):
     def list_backups(self, folder_name):
         self._require_credentials()
         folder_id = self._resolve_folder_id(folder_name)
-        query = "'{fid}' in parents and trashed = false".format(fid=folder_id)
+        query = "'{fid}' in parents and trashed = false".format(fid=_quote_query_value(folder_id))
         backups = []
         page_token = None
         while True:
@@ -444,10 +469,11 @@ class GoogleDriveProvider(SyncProvider):
         session_uri = headers.get('Location')
         if not session_uri:
             raise DriveHttpError(None, 'Drive did not return an upload session URI')
+        # Stream the file rather than reading it into memory.
         with open(archive_path, 'rb') as stream:
-            content = stream.read()
-        resource, _ = self._request('PUT', session_uri, raw_body=content,
-                                    content_type='application/zip')
+            resource, _ = self._request('PUT', session_uri, raw_body=stream,
+                                        content_type='application/zip',
+                                        extra_headers={'Content-Length': str(size)})
         backup = self._to_backup(resource)
         log.info('Uploaded %s (%d bytes)', backup.name, backup.size_bytes)
         return backup
@@ -457,9 +483,8 @@ class GoogleDriveProvider(SyncProvider):
         destination_path = Path(destination_path)
         destination_path.parent.mkdir(parents=True, exist_ok=True)
         url = '{api}/{file_id}'.format(api=self.DRIVE_API, file_id=backup.remote_id)
-        payload, _ = self._request('GET', url, params={'alt': 'media'}, timeout=600)
-        with open(destination_path, 'wb') as stream:
-            stream.write(payload)
+        self._request('GET', url, params={'alt': 'media'}, timeout=600,
+                      download_to=destination_path)
         log.info('Downloaded %s (%d bytes) to %s', backup.name, destination_path.stat().st_size,
                  destination_path)
         return destination_path

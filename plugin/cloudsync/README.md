@@ -77,12 +77,14 @@ shared.
 ## How syncing works
 
 - **Upload:** when your library changes (startup check, manual Sync now, or
-  a debounced auto-upload after a song edit), the whole data directory is
-  archived and uploaded to the Drive folder.
+  a debounced auto-upload after a song edit), a snapshot of the songs
+  database is archived and uploaded to the Drive folder.
 - **Download:** when the cloud has a newer backup and your library is
   unchanged, it is downloaded and applied **live** — no restart needed.
   Its songs are merged into your running library and the song list
-  refreshes in place; its other files are copied over your data directory.
+  refreshes in place.  Only the songs database and sync metadata are read
+  from a downloaded backup (after its checksum is verified); nothing else in
+  it is ever written to disk.
 - **Conflict (both sides changed):** songs are merged song-by-song.  New
   songs on either side are kept; edits to the same song resolve by
   `last_modified` (newer wins); **deletions propagate** — a song deleted on
