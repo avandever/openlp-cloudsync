@@ -86,10 +86,11 @@ def fake_token_exchange(monkeypatch):
     """Pretend Google's token endpoint; return the canned token response."""
     calls = []
 
-    def exchange(token_uri, client_id, client_secret, code, redirect_uri, timeout=30):
+    def exchange(token_uri, client_id, client_secret, code, redirect_uri, code_verifier,
+                 timeout=30):
         calls.append({
             'token_uri': token_uri, 'client_id': client_id, 'code': code,
-            'redirect_uri': redirect_uri,
+            'redirect_uri': redirect_uri, 'code_verifier': code_verifier,
         })
         assert code == 'auth-code-123'
         return {
@@ -123,6 +124,15 @@ def test_run_oauth_flow_happy_path(bundled_secrets, tmp_path, fake_token_exchang
     assert params['redirect_uri'][0].startswith('http://127.0.0.1:')
     assert 'drive.file' in params['scope'][0]
     assert params['state'][0]  # state present for the round-trip check
+    # PKCE: the URL carries the S256 challenge of the verifier the code
+    # exchange sends.
+    import base64
+    import hashlib
+    verifier = fake_token_exchange[0]['code_verifier']
+    assert 43 <= len(verifier) <= 128
+    expected = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=')
+    assert params['code_challenge_method'] == ['S256']
+    assert params['code_challenge'] == [expected.decode()]
     # Code exchange used the token endpoint from the secrets file.
     assert fake_token_exchange[0]['token_uri'] == 'https://oauth2.google.example/token'
     assert fake_token_exchange[0]['client_id'] == 'test-client-id'
@@ -395,3 +405,18 @@ def test_current_scopes_still_load(tmp_path):
     token_path = _write_token(tmp_path, GOOGLE_DRIVE_SCOPES)
     assert auth_module.has_valid_token(token_path) is True
     assert auth_module.load_credentials(token_path).token == 'access-1'
+
+
+def test_exchange_code_sends_pkce_verifier(monkeypatch):
+    sent = []
+
+    def post_form(url, payload, timeout=30):
+        sent.append(urllib.parse.parse_qs(payload.decode('ascii')))
+        return {'access_token': 'a'}
+
+    monkeypatch.setattr(auth_module, '_post_form', post_form)
+
+    auth_module._exchange_code('https://t', 'cid', 'cs', 'code-1', 'http://127.0.0.1:1/', 'verifier-xyz')
+
+    assert sent[0]['code_verifier'] == ['verifier-xyz']
+    assert sent[0]['grant_type'] == ['authorization_code']

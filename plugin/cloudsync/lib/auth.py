@@ -35,7 +35,9 @@ not ship the Google client libraries, and requiring users to ``pip
 install`` into a frozen app is not viable.  The OAuth "installed app"
 exchange and the Drive REST calls are small enough to implement directly.
 """
+import base64
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -415,7 +417,25 @@ def _read_client_secrets():
             section.get('token_uri') or DEFAULT_TOKEN_URI)
 
 
-def _exchange_code(token_uri, client_id, client_secret, code, redirect_uri, timeout=30):
+def _pkce_pair():
+    """
+    Generate a PKCE (RFC 7636) code verifier and its S256 challenge.
+
+    The challenge goes in the authorisation URL and the verifier in the code
+    exchange, so an intercepted authorisation code is useless on its own --
+    the bundled client secret is not secret, so it cannot provide that
+    protection.
+
+    :return: ``(code_verifier, code_challenge)``.
+    """
+    verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(verifier.encode('ascii')).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b'=').decode('ascii')
+    return verifier, challenge
+
+
+def _exchange_code(token_uri, client_id, client_secret, code, redirect_uri, code_verifier,
+                   timeout=30):
     """
     Exchange an OAuth authorisation code for tokens.
 
@@ -427,6 +447,7 @@ def _exchange_code(token_uri, client_id, client_secret, code, redirect_uri, time
         'client_id': client_id,
         'client_secret': client_secret,
         'code': code,
+        'code_verifier': code_verifier,
         'redirect_uri': redirect_uri,
     }).encode('ascii')
     data = _post_form(token_uri, payload, timeout=timeout)
@@ -465,6 +486,7 @@ def run_oauth_flow(token_path, status_callback=None, timeout_seconds=300,
     log.info('Opening default browser for Google OAuth consent')
 
     state = secrets.token_urlsafe(24)
+    code_verifier, code_challenge = _pkce_pair()
     # Bind the redirect receiver first so the redirect URI (with its
     # ephemeral loopback port) is known before the browser opens.
     server, port, result = _start_redirect_server(state)
@@ -477,6 +499,8 @@ def run_oauth_flow(token_path, status_callback=None, timeout_seconds=300,
         'access_type': 'offline',
         'prompt': 'consent',
         'state': state,
+        'code_challenge': code_challenge,
+        'code_challenge_method': 'S256',
     })
 
     opener = browser_opener or (lambda url: webbrowser.open(url, new=1, autoraise=True))
@@ -499,7 +523,7 @@ def run_oauth_flow(token_path, status_callback=None, timeout_seconds=300,
     if not code:
         raise AuthenticationError('Google did not return an authorisation code.')
 
-    data = _exchange_code(token_uri, client_id, client_secret, code, redirect_uri)
+    data = _exchange_code(token_uri, client_id, client_secret, code, redirect_uri, code_verifier)
     credentials = OAuthCredentials(
         token=data['access_token'],
         refresh_token=data.get('refresh_token'),
