@@ -4,14 +4,20 @@ on:
   push:
     tags: ['v*']
 
-permissions:
-  contents: write
+# Nothing gets write access by default; the build job asks for what it needs.
+permissions: {}
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # publish the GitHub release
     steps:
-      - uses: actions/checkout@v4
+      # Third-party actions are pinned to full commit SHAs (tags can be
+      # moved); Dependabot keeps them current (.github/dependabot.yml).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install NSIS and zip
         run: sudo apt-get update && sudo apt-get install -y nsis zip
@@ -37,7 +43,7 @@ jobs:
           cd dist && zip -qr "../openlp-cloudsync-portable-$VERSION.zip" openlp-cloudsync-portable
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           files: |
             CloudSync-Setup-*.exe
