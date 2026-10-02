@@ -27,6 +27,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "$VERSION" > plugin/cloudsync/version.txt
           sed -i "s/!define PLUGIN_VERSION \".*\"/!define PLUGIN_VERSION \"$VERSION\"/" installer/cloudsync-installer.nsi
+          sed -i "s/!define PLUGIN_VERSION \".*\"/!define PLUGIN_VERSION \"$VERSION\"/" installer/showdesktop-installer.nsi
 
       - name: Inject OAuth client secrets
         run: |
@@ -42,6 +43,12 @@ jobs:
           cd installer && makensis cloudsync-installer.nsi
           mv CloudSync-Setup-*.exe "$GITHUB_WORKSPACE/"
 
+      - name: Build Show Desktop installer
+        run: |
+          cp -r plugin/showdesktop installer/showdesktop
+          cd installer && makensis showdesktop-installer.nsi
+          mv ShowDesktop-Setup-*.exe "$GITHUB_WORKSPACE/"
+
       - name: Build portable zip
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -55,5 +62,6 @@ jobs:
         with:
           files: |
             CloudSync-Setup-*.exe
+            ShowDesktop-Setup-*.exe
             openlp-cloudsync-portable-*.zip
           generate_release_notes: true
