@@ -5,7 +5,7 @@
 ; Produces ShowDesktop-Setup-<version>.exe (a real Windows installer,
 ; no admin rights needed -- installs into the user's own AppData).
 
-!define PLUGIN_VERSION "1.0"
+!define PLUGIN_VERSION "1.1"
 !define PAYLOAD_DIR "showdesktop"
 
 !include "MUI2.nsh"

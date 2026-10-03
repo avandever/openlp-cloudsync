@@ -42,7 +42,7 @@ showdesktop_settings = {
 }
 
 
-class ShowDesktopPlugin(Plugin):
+class ShowdesktopPlugin(Plugin):
     """
     The Show Desktop on Startup plugin switches OpenLP's live display into
     "Show Desktop" mode once at application startup, so the projector
@@ -52,7 +52,7 @@ class ShowDesktopPlugin(Plugin):
         """
         Class __init__ method
         """
-        super(ShowDesktopPlugin, self).__init__('showdesktop')
+        super(ShowdesktopPlugin, self).__init__('showdesktop')
         self.weight = 0
         self.icon_path = UiIcons().desktop
         self.icon = self.icon_path
@@ -65,14 +65,14 @@ class ShowDesktopPlugin(Plugin):
         Initialise the plugin. Nothing to set up beyond the base class.
         """
         log.info('ShowDesktop Initialising')
-        super(ShowDesktopPlugin, self).initialise()
+        super(ShowdesktopPlugin, self).initialise()
 
     def finalise(self):
         """
         Tidy up on exit.
         """
         log.info('ShowDesktop Finalising')
-        super(ShowDesktopPlugin, self).finalise()
+        super(ShowdesktopPlugin, self).finalise()
 
     def app_startup(self):
         """
@@ -109,7 +109,7 @@ class ShowDesktopPlugin(Plugin):
 
         :return: text
         """
-        about_text = translate('ShowDesktopPlugin', '<strong>Show Desktop on Startup Plugin</strong>'
+        about_text = translate('ShowdesktopPlugin', '<strong>Show Desktop on Startup Plugin</strong>'
                                '<br />This plugin automatically puts OpenLP into Show Desktop mode '
                                'when the application starts, so the projector output shows the desktop '
                                'until you take the display live.')
@@ -121,10 +121,10 @@ class ShowDesktopPlugin(Plugin):
         """
         # Name PluginList
         self.text_strings[StringContent.Name] = {
-            'singular': translate('ShowDesktopPlugin', 'Show Desktop on Startup', 'name singular'),
-            'plural': translate('ShowDesktopPlugin', 'Show Desktop on Startup', 'name plural')
+            'singular': translate('ShowdesktopPlugin', 'Show Desktop on Startup', 'name singular'),
+            'plural': translate('ShowdesktopPlugin', 'Show Desktop on Startup', 'name plural')
         }
         # Name for MediaDockManager, SettingsManager
         self.text_strings[StringContent.VisibleName] = {
-            'title': translate('ShowDesktopPlugin', 'Show Desktop on Startup', 'container title')
+            'title': translate('ShowdesktopPlugin', 'Show Desktop on Startup', 'container title')
         }
