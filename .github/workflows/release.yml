@@ -28,6 +28,14 @@ jobs:
           echo "$VERSION" > plugin/cloudsync/version.txt
           sed -i "s/!define PLUGIN_VERSION \".*\"/!define PLUGIN_VERSION \"$VERSION\"/" installer/cloudsync-installer.nsi
 
+      - name: Inject OAuth client secrets
+        run: |
+          if [ -z "${{ secrets.CLIENT_JSON }}" ]; then
+            echo "::error::CLIENT_JSON secret is not set -- refusing to build a release without OAuth credentials."
+            exit 1
+          fi
+          printf '%s' '${{ secrets.CLIENT_JSON }}' > plugin/cloudsync/client.json
+      
       - name: Build Windows installer
         run: |
           cp -r plugin/cloudsync installer/cloudsync
