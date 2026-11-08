@@ -53,7 +53,8 @@ cloudsync_settings = {
     'cloudsync/provider': 'googledrive',
     'cloudsync/drive folder': 'OpenLP',
     'cloudsync/drive folder id': '',
-    'cloudsync/sync on startup': True,
+    # No 'sync on startup' key: startup sync always runs (when the
+    # plugin is enabled and configured) and cannot be turned off.
     'cloudsync/sync on song change': True,
     'cloudsync/debounce seconds': 60,
     'cloudsync/keep backups': 10,

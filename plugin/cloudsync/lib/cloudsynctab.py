@@ -186,9 +186,6 @@ class CloudSyncTab(SettingsTab):
         self.enable_check_box = QtWidgets.QCheckBox(self.behaviour_group_box)
         self.enable_check_box.setObjectName('enable_check_box')
         self.behaviour_layout.addWidget(self.enable_check_box)
-        self.sync_on_startup_check_box = QtWidgets.QCheckBox(self.behaviour_group_box)
-        self.sync_on_startup_check_box.setObjectName('sync_on_startup_check_box')
-        self.behaviour_layout.addWidget(self.sync_on_startup_check_box)
         self.sync_on_song_change_check_box = QtWidgets.QCheckBox(self.behaviour_group_box)
         self.sync_on_song_change_check_box.setObjectName('sync_on_song_change_check_box')
         self.behaviour_layout.addWidget(self.sync_on_song_change_check_box)
@@ -291,8 +288,6 @@ class CloudSyncTab(SettingsTab):
         """
         self.behaviour_group_box.setTitle(translate('CloudSyncPlugin.CloudSyncTab', 'Sync Behaviour'))
         self.enable_check_box.setText(translate('CloudSyncPlugin.CloudSyncTab', 'Enable cloud sync'))
-        self.sync_on_startup_check_box.setText(
-            translate('CloudSyncPlugin.CloudSyncTab', 'Sync when OpenLP starts'))
         self.sync_on_song_change_check_box.setText(
             translate('CloudSyncPlugin.CloudSyncTab', 'Sync after a song is created or updated'))
         self.debounce_label.setText(
@@ -430,7 +425,6 @@ class CloudSyncTab(SettingsTab):
         Load the settings into the UI.
         """
         self.enable_check_box.setChecked(bool(self.settings.value('cloudsync/enabled')))
-        self.sync_on_startup_check_box.setChecked(bool(self.settings.value('cloudsync/sync on startup')))
         self.sync_on_song_change_check_box.setChecked(bool(self.settings.value('cloudsync/sync on song change')))
         self.debounce_spin_box.setValue(int(self.settings.value('cloudsync/debounce seconds') or 60))
         self.folder_line_edit.setText(self.settings.value('cloudsync/drive folder') or 'OpenLP')
@@ -445,7 +439,6 @@ class CloudSyncTab(SettingsTab):
         Save the changes on exit of the Settings dialog.
         """
         self.settings.setValue('cloudsync/enabled', self.enable_check_box.isChecked())
-        self.settings.setValue('cloudsync/sync on startup', self.sync_on_startup_check_box.isChecked())
         self.settings.setValue('cloudsync/sync on song change', self.sync_on_song_change_check_box.isChecked())
         self.settings.setValue('cloudsync/debounce seconds', self.debounce_spin_box.value())
         self.settings.setValue('cloudsync/drive folder', self.folder_line_edit.text())

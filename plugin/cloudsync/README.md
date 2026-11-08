@@ -68,7 +68,6 @@ shared.
 | Setting | Default | Description |
 |---|---|---|
 | Enable cloud sync | off | Master switch |
-| Sync when OpenLP starts | on | Check/upload on startup |
 | Sync after a song is created or updated | on | Debounced auto-upload |
 | Wait before syncing after a song change | 60 s | Debounce window |
 | Drive folder | `OpenLP` | Folder in Drive holding the backups |
@@ -76,6 +75,13 @@ shared.
 
 ## How syncing works
 
+- **Startup sync always runs** (when sync is enabled and a Google account
+  is connected) — there is no setting to turn it off. It is the one
+  guaranteed moment a machine compares against the cloud before local
+  edits begin.
+- **Periodic sync:** every 30 minutes while OpenLP is open, the same
+  check-remote-first sync runs, so a machine left open for days still
+  converges with the cloud.
 - **Upload:** when your library changes (startup check, manual Sync now, or
   a debounced auto-upload after a song edit), a snapshot of the songs
   database is archived and uploaded to the Drive folder.

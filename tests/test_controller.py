@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from openlp.plugins.cloudsync.lib import synccontroller as synccontroller_module
 from openlp.plugins.cloudsync.lib.providers import RemoteBackup, SyncProvider
 from openlp.plugins.cloudsync.lib.state import load_state, record_remote_seen
 from openlp.plugins.cloudsync.lib.synccontroller import SyncController
@@ -547,6 +548,70 @@ class TestPerformStartupSync:
         result = controller.perform_startup_sync()
         assert result.success is False
         assert result.action == 'error'
+
+
+class _DummyWorker:
+    """Stand-in worker for GUI-thread entry-point tests (no real thread)."""
+    status_message = None
+    finished = None
+
+    def __init__(self, controller):
+        self.controller = controller
+
+
+class TestStartupSyncAlwaysOn:
+    def test_startup_sync_ignores_legacy_off_setting(self, controller, settings, monkeypatch):
+        """A 'sync on startup: False' left over from before v13.9 must not
+        stop the startup sync -- the option no longer exists."""
+        import openlp.plugins.cloudsync.lib.worker as worker_module
+        settings.setValue('cloudsync/sync on startup', False)
+        started = []
+        monkeypatch.setattr(controller, 'is_configured', lambda: True)
+        monkeypatch.setattr(synccontroller_module, 'is_thread_finished', lambda name: True)
+        monkeypatch.setattr(synccontroller_module, '_start_worker_thread',
+                            lambda worker, name, queued_connections=(): started.append(name))
+        monkeypatch.setattr(worker_module, 'StartupSyncWorker', _DummyWorker)
+        controller.startup_sync()
+        assert started == [synccontroller_module.STARTUP_THREAD_NAME]
+        assert controller._sync_running is True
+
+
+class TestPeriodicSync:
+    def test_timer_interval_is_thirty_minutes(self, controller):
+        assert synccontroller_module.PERIODIC_SYNC_INTERVAL_MS == 30 * 60 * 1000
+        assert controller._periodic_timer.interval() == synccontroller_module.PERIODIC_SYNC_INTERVAL_MS
+        assert controller._periodic_timer.isActive()
+
+    def test_periodic_flow_downloads_newer_remote(self, controller, tmp_path, monkeypatch):
+        provider = FakeProvider()
+        monkeypatch.setattr(controller, '_connect_provider', lambda: provider)
+        (tmp_path / 'songs.sqlite').write_bytes(b'data')
+        assert controller.perform_periodic_sync().action == 'uploaded'
+        provider.uploaded.clear()
+        backup = make_backup(created_utc='2099-01-01T00:00:00Z', sha256='newer-sha')
+        provider._backups = [backup]
+        result = controller.perform_periodic_sync()
+        assert result.success is True
+        assert result.action == 'downloaded'
+        assert not provider.uploaded, 'local unchanged: should not re-upload'
+
+    def test_periodic_tick_skips_when_not_configured(self, controller):
+        # Default settings: the plugin is disabled, so a timer tick must
+        # not start a sync.
+        controller._on_periodic_timeout()
+        assert controller._sync_running is False
+
+    def test_periodic_sync_starts_worker_when_configured(self, controller, monkeypatch):
+        import openlp.plugins.cloudsync.lib.worker as worker_module
+        started = []
+        monkeypatch.setattr(controller, 'is_configured', lambda: True)
+        monkeypatch.setattr(synccontroller_module, 'is_thread_finished', lambda name: True)
+        monkeypatch.setattr(synccontroller_module, '_start_worker_thread',
+                            lambda worker, name, queued_connections=(): started.append(name))
+        monkeypatch.setattr(worker_module, 'PeriodicSyncWorker', _DummyWorker)
+        controller.periodic_sync()
+        assert started == [synccontroller_module.PERIODIC_THREAD_NAME]
+        assert controller._sync_running is True
 
 
 class TestDriveFolderRef:

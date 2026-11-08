@@ -87,6 +87,16 @@ class StartupSyncWorker(SyncWorker):
         self.finished.emit(result.success, result.message)
 
 
+class PeriodicSyncWorker(SyncWorker):
+    """
+    Worker performing the periodic (30-minute) sync while OpenLP runs.
+    """
+    def run(self):
+        self.status_message.emit('Checking cloud library...')
+        result = self.controller.perform_periodic_sync(status_callback=self.status_message.emit)
+        self.finished.emit(result.success, result.message)
+
+
 class SongChangeSyncWorker(SyncWorker):
     """
     Worker uploading the library after songs were created or updated.

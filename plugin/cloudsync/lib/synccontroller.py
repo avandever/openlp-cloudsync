@@ -95,9 +95,16 @@ SyncResult = namedtuple('SyncResult', ['success', 'action', 'message'])
 # action is one of: 'skipped', 'uploaded', 'downloaded', 'in-sync', 'error'
 
 STARTUP_THREAD_NAME = 'cloudsync_startup'
+PERIODIC_THREAD_NAME = 'cloudsync_periodic'
 SONG_THREAD_NAME = 'cloudsync_song'
 MANUAL_THREAD_NAME = 'cloudsync_manual'
 AUTH_THREAD_NAME = 'cloudsync_auth'
+
+
+# How often the periodic sync runs while OpenLP is open.  The periodic
+# sync uses the full check-remote-first flow, so a library left open for
+# days still converges with the cloud at most one interval behind.
+PERIODIC_SYNC_INTERVAL_MS = 30 * 60 * 1000
 
 
 class SyncController(QtCore.QObject):
@@ -115,6 +122,10 @@ class SyncController(QtCore.QObject):
         self._debounce_timer = QtCore.QTimer(self)
         self._debounce_timer.setSingleShot(True)
         self._debounce_timer.timeout.connect(self._on_debounce_timeout)
+        self._periodic_timer = QtCore.QTimer(self)
+        self._periodic_timer.setInterval(PERIODIC_SYNC_INTERVAL_MS)
+        self._periodic_timer.timeout.connect(self._on_periodic_timeout)
+        self._periodic_timer.start()
         # Set by _merge_and_upload when a merge rewrote the live songs
         # database; consumed by _on_worker_finished, which then tries to
         # refresh the songs list in place instead of asking for a restart.
@@ -182,11 +193,12 @@ class SyncController(QtCore.QObject):
     def startup_sync(self):
         """
         Kick off the automatic startup sync in a background thread.
-        Called from the plugin's ``app_startup`` hook.
+        Called from the plugin's ``app_startup`` hook.  Startup sync is
+        not optional: it is the one guaranteed moment a machine compares
+        against the cloud before local edits begin, so there is no
+        setting to turn it off.  (Sync as a whole is still gated by the
+        plugin's ``enabled`` setting via :meth:`is_configured`.)
         """
-        if not bool(self.settings.value('cloudsync/sync on startup')):
-            log.debug('Cloud sync on startup is disabled')
-            return
         if self._sync_running or not is_thread_finished(STARTUP_THREAD_NAME):
             log.debug('Cloud sync already running, skipping startup sync')
             return
@@ -200,6 +212,32 @@ class SyncController(QtCore.QObject):
             (worker.status_message, self._on_status_message),
             (worker.finished, self._on_worker_finished),
         ])
+
+    def periodic_sync(self):
+        """
+        Kick off a periodic sync in a background thread.  Runs the same
+        check-remote-first flow as the startup and manual syncs, so an
+        OpenLP left open indefinitely still picks up other machines'
+        changes within one interval.  A tick that lands while another
+        sync is running (or before the plugin is configured) is simply
+        skipped -- the next tick retries.
+        """
+        if self._sync_running or not is_thread_finished(PERIODIC_THREAD_NAME):
+            log.debug('Cloud sync already running, skipping periodic sync')
+            return
+        if not self.is_configured():
+            log.debug('Cloud sync not configured, skipping periodic sync')
+            return
+        from .worker import PeriodicSyncWorker
+        self._sync_running = True
+        worker = PeriodicSyncWorker(self)
+        _start_worker_thread(worker, PERIODIC_THREAD_NAME, queued_connections=[
+            (worker.status_message, self._on_status_message),
+            (worker.finished, self._on_worker_finished),
+        ])
+
+    def _on_periodic_timeout(self):
+        self.periodic_sync()
 
     def on_song_changed(self, song_id=None):
         """
@@ -561,6 +599,14 @@ class SyncController(QtCore.QObject):
         """
         Automatic startup sync (worker thread): upload local changes,
         download newer remote libraries, song-level merge on conflict.
+        """
+        return self._sync_flow(status_callback)
+
+    def perform_periodic_sync(self, status_callback=None):
+        """
+        Periodic sync (worker thread): same decision flow as the
+        startup sync -- check the remote side first so a newer cloud
+        library is merged rather than overwritten.
         """
         return self._sync_flow(status_callback)
 
